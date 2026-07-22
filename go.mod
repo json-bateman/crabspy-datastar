@@ -3,7 +3,7 @@ module crabspy
 go 1.26
 
 require (
-	github.com/a-h/templ v0.3.977
+	github.com/a-h/templ v0.3.1020
 	github.com/benbjohnson/hashfs v0.2.2
 	github.com/go-chi/chi/v5 v5.2.4
 	github.com/gorilla/sessions v1.4.0

@@ -24,9 +24,12 @@ tasks:
   go:build:
     desc: Build for production
     deps: [templ:build, sqlc]
+    vars:
+      COMMIT:
+        sh: git rev-parse --short HEAD
     cmds:
       - mkdir -p ./release
-      - go build -o ./release/watchma ./cmd/main.go
+      - go build -ldflags "-X 'crabspy/web.Commit={{.COMMIT}}'" -o ./release/watchma ./cmd/main.go
       - echo "Release built in ./release/"
 
   clean:

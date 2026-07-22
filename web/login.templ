@@ -62,6 +62,13 @@ templ Login(errMsg string) {
 					<div class="color-error">{ errMsg }</div>
 				}
 			</div>
+			<div
+				class="text-xs color-text opacity-50"
+				title="deployed commit"
+				style="position: fixed; inset-block-end: var(--size-2); inset-inline: 0; text-align: center;"
+			>
+				{ CommitLabel() }
+			</div>
 		</main>
 	}
 }

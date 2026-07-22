@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
@@ -41,7 +42,15 @@ func NewDatabase(ctx context.Context, dbPath string) (*sql.DB,
 	return db, nil
 }
 
+// migrationMu serializes goose's package-global config (SetBaseFS/SetDialect/Up),
+// which is not safe for concurrent use. In production migrations run once at
+// startup; this matters when parallel tests each build their own database.
+var migrationMu sync.Mutex
+
 func runMigrations(db *sql.DB) error {
+	migrationMu.Lock()
+	defer migrationMu.Unlock()
+
 	goose.SetBaseFS(migrationsFS)
 
 	if err := goose.SetDialect("sqlite3"); err != nil {

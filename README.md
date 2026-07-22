@@ -42,6 +42,23 @@ CRABSPY_PORT=3012
 CRABSPY_DB_PATH=./data/crabspy.db
 ```
 
+## Testing
+
+Browser (`web/`) tests use headless Chrome via chromedp.
+
+```bash
+go test ./...                                    # all tests, headless
+go test ./... -race                              # catch data races (use in CI)
+CRABSPY_HEADED=1 go test ./web/                  # watch the web suite in real browsers
+CRABSPY_HEADED=1 go test ./web/ -run TestName    # watch one test
+```
+
+- `CRABSPY_HEADED=1` — visible browsers (env var, not a flag, so `./...` still works).
+- `-count=1` — bypass the test cache (results are cached per test binary).
+
+Notes for the browser tests:
+- The two multi-browser tests (`TestRoomFull`, `TestPlayThroughGame`) are intentionally **not** `t.Parallel()` — each needs ~8 Chrome instances at once.
+
 ## Docker
 
 ```bash

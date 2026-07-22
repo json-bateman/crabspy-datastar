@@ -148,6 +148,7 @@ func validateSignup(db *sql.DB) http.HandlerFunc {
 		}
 
 		sse := datastar.NewSSE(w, r)
+		datastar.WithCompression()
 		rules, _ := valid(r.Context(), signals, db)
 		sse.PatchElementTempl(Signup(rules))
 	}
@@ -418,20 +419,33 @@ func roomSSE(db *sql.DB, bus *eventbus.Bus) http.HandlerFunc {
 		sse := datastar.NewSSE(w, r)
 
 		members, _ := q.GetRoomMembers(r.Context(), room.ID)
-		if int64(len(members)) >= room.MaxPlayers {
-			sse.Redirect("/full")
-			return
+		alreadyMember := false
+		for _, m := range members {
+			if m.UserID == userID {
+				alreadyMember = true
+				break
+			}
+		}
+
+		// Only new members consume a slot. The insert is atomic with the
+		// max-players check, so simultaneous joins can't exceed the cap:
+		// 0 rows affected means the room filled up first.
+		if !alreadyMember {
+			joined, err := q.JoinRoomIfNotFull(r.Context(), sqlcgen.JoinRoomIfNotFullParams{
+				RoomID: room.ID,
+				UserID: userID,
+			})
+			if err != nil {
+				slog.Error("Error adding user to room", "err", err, "roomID", room.ID, "userID", userID)
+			}
+			if joined == 0 {
+				sse.Redirect("/full")
+				return
+			}
 		}
 
 		ch := bus.SubscribeRoom(room.ID)
 		defer bus.UnsubscribeRoom(room.ID, ch)
-
-		if err := q.JoinRoom(r.Context(), sqlcgen.JoinRoomParams{
-			RoomID: room.ID,
-			UserID: userID,
-		}); err != nil {
-			slog.Error("Error adding user to room", "err", err, "roomID", room.ID, "userID", userID)
-		}
 		bus.NotifyRoom(room.ID)
 		slog.Debug("User joined room", "roomID", room.ID, "userID", userID)
 

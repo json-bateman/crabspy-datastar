@@ -29,6 +29,9 @@ templ Home(user sqlcgen.User) {
 					>
 						{ user.DisplayName }
 					</span>
+					<span class="text-xs color-text opacity-50 text-outline">
+						{ "!" + user.Tripcode }
+					</span>
 				</div>
 			</div>
 			<div class="action-container">

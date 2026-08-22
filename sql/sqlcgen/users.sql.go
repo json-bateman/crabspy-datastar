@@ -10,28 +10,28 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (username, password_hash, display_name)
+INSERT INTO users (username, display_name, tripcode)
 VALUES (?, ?, ?)
-RETURNING id, username, password_hash, display_name, created_at, crab_avatar
+RETURNING id, username, display_name, tripcode, created_at, crab_avatar
 `
 
 type CreateUserParams struct {
-	Username     string `json:"username"`
-	PasswordHash string `json:"password_hash"`
-	DisplayName  string `json:"display_name"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Tripcode    string `json:"tripcode"`
 }
 
 // -------------------------
 // CREATE, UPDATE, DELETE
 // -------------------------
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, createUser, arg.Username, arg.PasswordHash, arg.DisplayName)
+	row := q.db.QueryRowContext(ctx, createUser, arg.Username, arg.DisplayName, arg.Tripcode)
 	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
-		&i.PasswordHash,
 		&i.DisplayName,
+		&i.Tripcode,
 		&i.CreatedAt,
 		&i.CrabAvatar,
 	)
@@ -39,7 +39,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const getUserById = `-- name: GetUserById :one
-SELECT id, username, password_hash, display_name, created_at, crab_avatar FROM users
+SELECT id, username, display_name, tripcode, created_at, crab_avatar FROM users
 WHERE id = ?
 LIMIT 1
 `
@@ -50,28 +50,28 @@ func (q *Queries) GetUserById(ctx context.Context, id int64) (User, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
-		&i.PasswordHash,
 		&i.DisplayName,
+		&i.Tripcode,
 		&i.CreatedAt,
 		&i.CrabAvatar,
 	)
 	return i, err
 }
 
-const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, password_hash, display_name, created_at, crab_avatar FROM users
-WHERE username = ?
+const getUserByTripcode = `-- name: GetUserByTripcode :one
+SELECT id, username, display_name, tripcode, created_at, crab_avatar FROM users
+WHERE tripcode = ?
 LIMIT 1
 `
 
-func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserByUsername, username)
+func (q *Queries) GetUserByTripcode(ctx context.Context, tripcode string) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByTripcode, tripcode)
 	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
-		&i.PasswordHash,
 		&i.DisplayName,
+		&i.Tripcode,
 		&i.CreatedAt,
 		&i.CrabAvatar,
 	)
@@ -79,7 +79,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 }
 
 const updateUserAvatar = `-- name: UpdateUserAvatar :one
-UPDATE users SET crab_avatar = ? WHERE id = ? RETURNING id, username, password_hash, display_name, created_at, crab_avatar
+UPDATE users SET crab_avatar = ? WHERE id = ? RETURNING id, username, display_name, tripcode, created_at, crab_avatar
 `
 
 type UpdateUserAvatarParams struct {
@@ -93,8 +93,32 @@ func (q *Queries) UpdateUserAvatar(ctx context.Context, arg UpdateUserAvatarPara
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
-		&i.PasswordHash,
 		&i.DisplayName,
+		&i.Tripcode,
+		&i.CreatedAt,
+		&i.CrabAvatar,
+	)
+	return i, err
+}
+
+const updateUserName = `-- name: UpdateUserName :one
+UPDATE users SET username = ?, display_name = ? WHERE id = ? RETURNING id, username, display_name, tripcode, created_at, crab_avatar
+`
+
+type UpdateUserNameParams struct {
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	ID          int64  `json:"id"`
+}
+
+func (q *Queries) UpdateUserName(ctx context.Context, arg UpdateUserNameParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, updateUserName, arg.Username, arg.DisplayName, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.Tripcode,
 		&i.CreatedAt,
 		&i.CrabAvatar,
 	)

@@ -15,7 +15,6 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/gorilla/sessions"
-	"golang.org/x/crypto/bcrypt"
 
 	"crabspy/internal/eventbus"
 	crabsql "crabspy/sql"
@@ -86,17 +85,15 @@ func newBrowserCtx(t *testing.T, timeout time.Duration) context.Context {
 	return ctx
 }
 
-// createUser inserts a user directly into the DB, bypassing the signup UI.
-func createUser(t *testing.T, db *sql.DB, username, password string) sqlcgen.User {
+// createUser inserts a user directly into the DB, bypassing the login UI. The
+// tripcode is derived from secret exactly as the server does, so a later
+// loginAs with the same secret lands on this same user row.
+func createUser(t *testing.T, db *sql.DB, username, secret string) sqlcgen.User {
 	t.Helper()
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
-	if err != nil {
-		t.Fatalf("bcrypt: %v", err)
-	}
 	user, err := sqlcgen.New(db).CreateUser(context.Background(), sqlcgen.CreateUserParams{
-		Username:     username,
-		PasswordHash: string(hash),
-		DisplayName:  username,
+		Username:    username,
+		DisplayName: username,
+		Tripcode:    Tripcode(secret),
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -104,12 +101,12 @@ func createUser(t *testing.T, db *sql.DB, username, password string) sqlcgen.Use
 	return user
 }
 
-// loginAs navigates to /login and authenticates as the given user.
-func loginAs(t *testing.T, ctx context.Context, srv *httptest.Server, username, password string) {
+// loginAs navigates to /login and joins with the given name and secret.
+func loginAs(t *testing.T, ctx context.Context, srv *httptest.Server, username, secret string) {
 	t.Helper()
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(srv.URL+"/login"),
-		chromedp.WaitVisible(`#login-username`),
+		chromedp.WaitVisible(`#login-name`),
 	); err != nil {
 		screenshot(t, ctx, "loginAs-failure")
 		t.Fatalf("loginAs %s: %v", username, err)
@@ -117,8 +114,8 @@ func loginAs(t *testing.T, ctx context.Context, srv *httptest.Server, username, 
 	// Retry until the home splash appears — an early click before Datastar wires
 	// @post('/login') is a silent no-op (see submitUntil).
 	submitUntil(t, ctx, `.splash-wrapper`,
-		setDatastarInput(`#login-username`, username),
-		setDatastarInput(`#login-password`, password),
+		setDatastarInput(`#login-name`, username),
+		setDatastarInput(`#login-secret`, secret),
 		chromedp.Click(`button.btn-accent`),
 	)
 }
@@ -208,37 +205,13 @@ func setDatastarInput(sel, value string) chromedp.Action {
 	return chromedp.Evaluate(js, nil)
 }
 
-func TestSignupAndLogin(t *testing.T) {
+func TestTripcodeLogin(t *testing.T) {
 	t.Parallel()
-	srv, _ := newTestServer(t)
+	srv, db := newTestServer(t)
 	ctx := newBrowserCtx(t, 20*time.Second)
 
-	// Sign up — the submit button is only rendered after Datastar validation
-	// passes, so retry the fill until it appears, then submit.
-	if err := chromedp.Run(ctx,
-		chromedp.Navigate(srv.URL+"/signup"),
-		chromedp.WaitVisible(`#signup-username`),
-	); err != nil {
-		screenshot(t, ctx, "signup-failure")
-		t.Fatalf("signup: %v", err)
-	}
-	submitUntil(t, ctx, `button.btn-secondary`,
-		setDatastarInput(`#signup-username`, "testuser"),
-		setDatastarInput(`#signup-password`, "Cr4bSpy!x9Qz#Test"),
-	)
-	if err := chromedp.Run(ctx,
-		chromedp.Click(`button.btn-secondary`),
-		chromedp.WaitVisible(`#login-username`),
-	); err != nil {
-		screenshot(t, ctx, "signup-failure")
-		t.Fatalf("signup: %v", err)
-	}
-
-	submitUntil(t, ctx, `.splash-wrapper`,
-		setDatastarInput(`#login-username`, "testuser"),
-		setDatastarInput(`#login-password`, "Cr4bSpy!x9Qz#Test"),
-		chromedp.Click(`button.btn-accent`),
-	)
+	// Joining with a fresh secret creates the user on the fly.
+	loginAs(t, ctx, srv, "testuser", "crabby-secret")
 	var location string
 	if err := chromedp.Run(ctx, chromedp.Location(&location)); err != nil {
 		t.Fatalf("location: %v", err)
@@ -246,23 +219,39 @@ func TestSignupAndLogin(t *testing.T) {
 	if location != srv.URL+"/" {
 		t.Errorf("expected redirect to /, got %s", location)
 	}
+
+	user, err := sqlcgen.New(db).GetUserByTripcode(context.Background(), Tripcode("crabby-secret"))
+	if err != nil {
+		t.Fatalf("expected user created for tripcode: %v", err)
+	}
+
+	// Rejoining with the same secret under a new name reclaims the same user.
+	loginAs(t, ctx, srv, "renamed", "crabby-secret")
+	again, err := sqlcgen.New(db).GetUserByTripcode(context.Background(), Tripcode("crabby-secret"))
+	if err != nil {
+		t.Fatalf("expected user still present for tripcode: %v", err)
+	}
+	if again.ID != user.ID {
+		t.Errorf("expected same user for same secret, got %d and %d", user.ID, again.ID)
+	}
+	if again.DisplayName != "renamed" {
+		t.Errorf("expected display name updated to renamed, got %s", again.DisplayName)
+	}
 }
 
-func TestLoginInvalidCredentials(t *testing.T) {
+func TestLoginEmptyNameRejected(t *testing.T) {
 	t.Parallel()
 	srv, _ := newTestServer(t)
 	ctx := newBrowserCtx(t, 15*time.Second)
 
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(srv.URL+"/login"),
-		chromedp.WaitVisible(`#login-username`),
+		chromedp.WaitVisible(`#login-name`),
 	); err != nil {
-		screenshot(t, ctx, "login-invalid-failure")
+		screenshot(t, ctx, "login-empty-name-failure")
 		t.Fatal(err)
 	}
 	submitUntil(t, ctx, `.color-error`,
-		setDatastarInput(`#login-username`, "nobody"),
-		setDatastarInput(`#login-password`, "Zx9!qWrong$Crab7"),
 		chromedp.Click(`button.btn-accent`),
 	)
 	var errText string
@@ -296,8 +285,8 @@ func TestHostRoom(t *testing.T) {
 	srv, db := newTestServer(t)
 	ctx := newBrowserCtx(t, 20*time.Second)
 
-	createUser(t, db, "host", "Cr4bSpy!x9Qz#Test")
-	loginAs(t, ctx, srv, "host", "Cr4bSpy!x9Qz#Test")
+	createUser(t, db, "host", "host")
+	loginAs(t, ctx, srv, "host", "host")
 
 	location := hostCreateRoom(t, ctx, srv, "TestRoom")
 	if !strings.Contains(location, "/room/") {
@@ -312,13 +301,12 @@ func TestRoomFull(t *testing.T) {
 	// the other multi-browser test spawns enough Chrome instances to starve the
 	// CPU and blow the per-context timeouts. Non-parallel tests run isolated
 	// (before the parallel ones resume), so it gets the machine to itself.
-	const pw = "Cr4bSpy!x9Qz#Test"
 	srv, db := newTestServer(t)
 
 	// Host creates the room (occupies slot 1).
 	hostCtx := newBrowserCtx(t, 20*time.Second)
-	createUser(t, db, "host", pw)
-	loginAs(t, hostCtx, srv, "host", pw)
+	createUser(t, db, "host", "host")
+	loginAs(t, hostCtx, srv, "host", "host")
 	roomURL := hostCreateRoom(t, hostCtx, srv, "FullRoom")
 
 	// Fill the remaining 7 slots (players 2-8) in parallel.
@@ -326,12 +314,12 @@ func TestRoomFull(t *testing.T) {
 	for i := 2; i <= 8; i++ {
 		i := i
 		username := fmt.Sprintf("player%d", i)
-		createUser(t, db, username, pw)
+		createUser(t, db, username, username)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			pCtx := newBrowserCtx(t, 20*time.Second)
-			loginAs(t, pCtx, srv, username, pw)
+			loginAs(t, pCtx, srv, username, username)
 			if err := chromedp.Run(pCtx,
 				chromedp.Navigate(roomURL),
 				chromedp.WaitVisible(`span.color-accent.font-bold`),
@@ -344,9 +332,9 @@ func TestRoomFull(t *testing.T) {
 	wg.Wait()
 
 	// 9th player should be redirected to /full.
-	createUser(t, db, "player9", pw)
+	createUser(t, db, "player9", "player9")
 	overCtx := newBrowserCtx(t, 20*time.Second)
-	loginAs(t, overCtx, srv, "player9", pw)
+	loginAs(t, overCtx, srv, "player9", "player9")
 
 	var overLocation string
 	if err := chromedp.Run(overCtx,
@@ -370,7 +358,6 @@ func TestRoomFull(t *testing.T) {
 // deterministic rather than a flaky fan-out of browsers.
 func TestConcurrentJoinsRespectMaxPlayers(t *testing.T) {
 	t.Parallel()
-	const pw = "Cr4bSpy!x9Qz#Test"
 	const maxPlayers = 8
 	const attempts = 30 // way more joiners than slots
 
@@ -382,7 +369,7 @@ func TestConcurrentJoinsRespectMaxPlayers(t *testing.T) {
 	q := sqlcgen.New(db)
 	ctx := context.Background()
 
-	host := createUser(t, db, "host", pw)
+	host := createUser(t, db, "host", "host")
 	room, err := q.CreateRoom(ctx, sqlcgen.CreateRoomParams{
 		Name:          "Race",
 		HostID:        host.ID,
@@ -397,7 +384,8 @@ func TestConcurrentJoinsRespectMaxPlayers(t *testing.T) {
 
 	userIDs := make([]int64, attempts)
 	for i := range userIDs {
-		userIDs[i] = createUser(t, db, fmt.Sprintf("racer%d", i), pw).ID
+		name := fmt.Sprintf("racer%d", i)
+		userIDs[i] = createUser(t, db, name, name).ID
 	}
 
 	// Release every goroutine at once via a barrier so they contend maximally.
@@ -457,7 +445,6 @@ func TestPlayThroughGame(t *testing.T) {
 	// Not t.Parallel: spawns 8 browsers. See the note on TestRoomFull — running
 	// the two multi-browser tests concurrently starves Chrome and causes
 	// "context deadline exceeded" login timeouts.
-	const pw = "Cr4bSpy!x9Qz#Test"
 	const totalPlayers = 8 // host + 7 joiners == room MaxPlayers default
 
 	srv, db := newTestServer(t)
@@ -468,8 +455,8 @@ func TestPlayThroughGame(t *testing.T) {
 	ctxs[1] = newBrowserCtx(t, 20*time.Second)
 
 	// Host logs in and creates the room.
-	createUser(t, db, "host", pw)
-	loginAs(t, ctxs[1], srv, "host", pw)
+	createUser(t, db, "host", "host")
+	loginAs(t, ctxs[1], srv, "host", "host")
 	roomURL := hostCreateRoom(t, ctxs[1], srv, "PlayThru") // name <= 10 chars
 
 	// The other 7 players log in and join concurrently.
@@ -477,12 +464,12 @@ func TestPlayThroughGame(t *testing.T) {
 	for i := 2; i <= totalPlayers; i++ {
 		i := i
 		username := fmt.Sprintf("player%d", i)
-		createUser(t, db, username, pw)
+		createUser(t, db, username, username)
 		ctxs[i] = newBrowserCtx(t, 20*time.Second)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			loginAs(t, ctxs[i], srv, username, pw)
+			loginAs(t, ctxs[i], srv, username, username)
 			if err := chromedp.Run(ctxs[i],
 				chromedp.Navigate(roomURL),
 				chromedp.WaitVisible(`span.color-accent.font-bold`),

@@ -50,10 +50,10 @@ type RoomMember struct {
 }
 
 type User struct {
-	ID           int64  `json:"id"`
-	Username     string `json:"username"`
-	PasswordHash string `json:"password_hash"`
-	DisplayName  string `json:"display_name"`
-	CreatedAt    int64  `json:"created_at"`
-	CrabAvatar   string `json:"crab_avatar"`
+	ID          int64  `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Tripcode    string `json:"tripcode"`
+	CreatedAt   int64  `json:"created_at"`
+	CrabAvatar  string `json:"crab_avatar"`
 }

@@ -1,8 +1,8 @@
 package web
 
 type LoginSignals struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Name   string `json:"name"`
+	Secret string `json:"secret"`
 }
 
 type HostSignals struct {
@@ -15,12 +15,6 @@ type HostSignals struct {
 type HostRules struct {
 	NameTooLong bool
 	NameEmpty   bool
-}
-
-type SignupRules struct {
-	Has8          bool
-	UsernameTaken bool
-	LessThan12    bool
 }
 
 type Player struct {

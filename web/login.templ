@@ -8,36 +8,36 @@ templ Login(errMsg string) {
 					<img class="w-full contain pixelated" src={ StaticPath("images/player-crabs/tourist-crab.png") }/>
 				</div>
 				<h3>We're so back</h3>
-				<span>Don't have an account yet?&nbsp;<a class="hover-secondary" href="/signup">Signup</a></span>
 				<div class="flex-col mt-4">
-					<label for="login-username">Username</label>
+					<label for="login-name">Name</label>
 					<input
-						id="login-username"
-						name="login-username"
-						autocomplete="username"
+						id="login-name"
+						name="login-name"
+						autocomplete="nickname"
 						if errMsg != "" {
 							class="input input-error"
 						} else {
 							class="input input-accent"
 						}
 						type="text"
+						maxlength="12"
 						data-on:keydown={ `
-                            if (evt.key !== 'Enter' || !$username.trim().length || !$password.trim().length) { 
-                                return; 
+                            if (evt.key !== 'Enter' || !$name.trim().length) {
+                                return;
                             };
                             @post('/login');
                         ` }
 						required
-						data-bind:username
+						data-bind:name
 						aria-live="polite"
-						aria-describedby="username"
+						aria-describedby="name"
 					/>
 				</div>
 				<div class="flex-col mb-2">
-					<label for="login-password">Password</label>
+					<label for="login-secret">Secret phrase (optional)</label>
 					<input
-						id="login-password"
-						name="login-password"
+						id="login-secret"
+						name="login-secret"
 						autocomplete="current-password"
 						if errMsg != "" {
 							class="input input-error"
@@ -46,18 +46,20 @@ templ Login(errMsg string) {
 						}
 						type="password"
 						data-on:keydown={ `
-                            if (evt.key !== 'Enter' || !$username.trim().length || !$password.trim().length) { 
-                                return; 
+                            if (evt.key !== 'Enter' || !$name.trim().length) {
+                                return;
                             };
                             @post('/login');
                         ` }
-						required
-						data-bind:password
+						data-bind:secret
 						aria-live="polite"
-						aria-describedby="password"
+						aria-describedby="secret"
 					/>
 				</div>
-				<button class="btn btn-accent shadow" data-on:click="@post('/login')">Login</button>
+				<span class="text-xs opacity-50" style="max-inline-size: var(--size-14); text-align: center;">
+					Type the same secret next time to keep your crab. Leave it blank to play as a fresh crab.
+				</span>
+				<button class="btn btn-accent shadow mt-2" data-on:click="@post('/login')">Play</button>
 				if errMsg != "" {
 					<div class="color-error">{ errMsg }</div>
 				}

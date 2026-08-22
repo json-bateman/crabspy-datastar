@@ -5,13 +5,13 @@ go 1.26
 require (
 	github.com/a-h/templ v0.3.1020
 	github.com/benbjohnson/hashfs v0.2.2
+	github.com/chromedp/chromedp v0.15.1
 	github.com/go-chi/chi/v5 v5.2.4
 	github.com/gorilla/sessions v1.4.0
 	github.com/joho/godotenv v1.5.1
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/pressly/goose/v3 v3.26.0
 	github.com/starfederation/datastar-go v1.1.0
-	golang.org/x/crypto v0.40.0
 	modernc.org/sqlite v1.44.3
 )
 
@@ -19,7 +19,6 @@ require (
 	github.com/CAFxX/httpcompression v0.0.9 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/chromedp/cdproto v0.0.0-20260321001828-e3e3800016bc // indirect
-	github.com/chromedp/chromedp v0.15.1 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect

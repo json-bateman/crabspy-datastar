@@ -1,9 +1,9 @@
 -- +goose Up
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
-    username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
+    username TEXT NOT NULL,
     display_name TEXT NOT NULL DEFAULT '',
+    tripcode TEXT NOT NULL UNIQUE,
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     crab_avatar TEXT NOT NULL DEFAULT 'tourist-crab.png'
 );

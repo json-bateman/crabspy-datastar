@@ -134,24 +134,24 @@ func (q *Queries) GetRoomById(ctx context.Context, id int64) (Room, error) {
 }
 
 const getRoomMembers = `-- name: GetRoomMembers :many
-SELECT room_id, user_id, joined_at, is_ready, points, id, username, password_hash, display_name, created_at, crab_avatar
+SELECT room_id, user_id, joined_at, is_ready, points, id, username, display_name, tripcode, created_at, crab_avatar
 FROM room_members rm
 JOIN users ON users.id = rm.user_id
 WHERE rm.room_id = ?
 `
 
 type GetRoomMembersRow struct {
-	RoomID       int64  `json:"room_id"`
-	UserID       int64  `json:"user_id"`
-	JoinedAt     int64  `json:"joined_at"`
-	IsReady      int64  `json:"is_ready"`
-	Points       int64  `json:"points"`
-	ID           int64  `json:"id"`
-	Username     string `json:"username"`
-	PasswordHash string `json:"password_hash"`
-	DisplayName  string `json:"display_name"`
-	CreatedAt    int64  `json:"created_at"`
-	CrabAvatar   string `json:"crab_avatar"`
+	RoomID      int64  `json:"room_id"`
+	UserID      int64  `json:"user_id"`
+	JoinedAt    int64  `json:"joined_at"`
+	IsReady     int64  `json:"is_ready"`
+	Points      int64  `json:"points"`
+	ID          int64  `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Tripcode    string `json:"tripcode"`
+	CreatedAt   int64  `json:"created_at"`
+	CrabAvatar  string `json:"crab_avatar"`
 }
 
 func (q *Queries) GetRoomMembers(ctx context.Context, roomID int64) ([]GetRoomMembersRow, error) {
@@ -171,8 +171,8 @@ func (q *Queries) GetRoomMembers(ctx context.Context, roomID int64) ([]GetRoomMe
 			&i.Points,
 			&i.ID,
 			&i.Username,
-			&i.PasswordHash,
 			&i.DisplayName,
+			&i.Tripcode,
 			&i.CreatedAt,
 			&i.CrabAvatar,
 		); err != nil {

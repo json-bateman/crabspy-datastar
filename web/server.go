@@ -6,8 +6,12 @@ import (
 	"crabspy/internal"
 	"crabspy/internal/eventbus"
 	"crabspy/sql/sqlcgen"
+	"crypto/hmac"
+	crand "crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,7 +27,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/sessions"
 	"github.com/starfederation/datastar-go/datastar"
-	"golang.org/x/crypto/bcrypt"
 )
 
 //go:embed static/*
@@ -68,14 +71,11 @@ func setupRoutes(db *sql.DB, bus *eventbus.Bus) chi.Router {
 	})
 
 	// Public web routes
-	r.Get("/signup", signupPage())
 	r.Get("/login", loginPage())
 	r.Get("/artists", func(w http.ResponseWriter, r *http.Request) {
 		Artists().Render(r.Context(), w)
 	})
 
-	r.Post("/validate/signup", validateSignup(db))
-	r.Post("/signup", signup(db))
 	r.Post("/login", login(db))
 	r.Post("/logout", logout())
 
@@ -113,79 +113,21 @@ func setupRoutes(db *sql.DB, bus *eventbus.Bus) chi.Router {
 	return r
 }
 
-func valid(ctx context.Context, signals LoginSignals, db *sql.DB) (SignupRules, bool) {
-	var rules SignupRules
-
-	runesU := []rune(signals.Username)
-	runesP := []rune(signals.Password)
-	u := len(runesU)
-	p := len(runesP)
-	rules.Has8 = p >= 8
-	rules.LessThan12 = u < 12
-
-	q := sqlcgen.New(db)
-	_, err := q.GetUserByUsername(ctx, signals.Username)
-	if err == nil {
-		rules.UsernameTaken = true
-	} else if err != sql.ErrNoRows {
-		log.Printf("db error: %v", err)
+// Tripcode derives a short stable identifier from a secret phrase: the same
+// secret always maps to the same identity, so a player reclaims their crab by
+// typing the same secret next visit — no password, no account recovery. An
+// empty secret yields a random identity that lives only as long as the
+// session cookie. Note: rotating COOKIE_STORE_SECRET_KEY changes every
+// tripcode.
+func Tripcode(secret string) string {
+	if strings.TrimSpace(secret) == "" {
+		b := make([]byte, 16)
+		crand.Read(b)
+		return base64.RawURLEncoding.EncodeToString(b)[:10]
 	}
-	valid := rules.Has8 && !rules.UsernameTaken
-	return rules, valid
-}
-
-func signupPage() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		Signup(SignupRules{}).Render(r.Context(), w)
-	}
-}
-
-func validateSignup(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var signals LoginSignals
-		if err := json.NewDecoder(r.Body).Decode(&signals); err != nil {
-			return
-		}
-
-		sse := datastar.NewSSE(w, r)
-		datastar.WithCompression()
-		rules, _ := valid(r.Context(), signals, db)
-		sse.PatchElementTempl(Signup(rules))
-	}
-}
-
-func signup(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var signals LoginSignals
-		if err := json.NewDecoder(r.Body).Decode(&signals); err != nil {
-			return
-		}
-
-		_, valid := valid(r.Context(), signals, db)
-		if !valid {
-			sse := datastar.NewSSE(w, r)
-			slog.Error("User failed validity check for username/password")
-			sse.PatchElementTempl(Error("Invalid Username or Password"))
-			return
-		}
-
-		q := sqlcgen.New(db)
-		hash, _ := bcrypt.GenerateFromPassword([]byte(signals.Password), bcrypt.DefaultCost)
-		_, err := q.CreateUser(r.Context(), sqlcgen.CreateUserParams{
-			Username:     signals.Username,
-			PasswordHash: string(hash),
-			DisplayName:  signals.Username,
-		})
-		if err != nil {
-			sse := datastar.NewSSE(w, r)
-			slog.Error("Error creating user", "err", err)
-			sse.PatchElementTempl(Error("Error adding user to DB"))
-			return
-		}
-		slog.Debug("New user created", "username", signals.Username)
-		sse := datastar.NewSSE(w, r)
-		sse.Redirect("/login")
-	}
+	mac := hmac.New(sha256.New, []byte(crabspy.Env.CookieStoreSecret))
+	mac.Write([]byte(secret))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))[:10]
 }
 
 func loginPage() http.HandlerFunc {
@@ -202,23 +144,35 @@ func login(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		q := sqlcgen.New(db)
-		user, err := q.GetUserByUsername(r.Context(), signals.Username)
-		if err != nil {
+		name := strings.TrimSpace(signals.Name)
+		if n := len([]rune(name)); n == 0 || n > 12 {
 			sse := datastar.NewSSE(w, r)
-			if errors.Is(err, sql.ErrNoRows) {
-				sse.PatchElementTempl(Login("Username or password is incorrect."))
-			} else {
-				slog.Error("Error fetching user from DB", "err", err)
-				sse.PatchElementTempl(Login("Something went wrong."))
-			}
+			sse.PatchElementTempl(Login("Name must be 1-12 characters."))
 			return
 		}
 
-		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(signals.Password)); err != nil {
+		trip := Tripcode(signals.Secret)
+		q := sqlcgen.New(db)
+		user, err := q.GetUserByTripcode(r.Context(), trip)
+		switch {
+		case err == nil:
+			// Returning tripcode — refresh the name they typed this visit.
+			user, err = q.UpdateUserName(r.Context(), sqlcgen.UpdateUserNameParams{
+				Username:    name,
+				DisplayName: name,
+				ID:          user.ID,
+			})
+		case errors.Is(err, sql.ErrNoRows):
+			user, err = q.CreateUser(r.Context(), sqlcgen.CreateUserParams{
+				Username:    name,
+				DisplayName: name,
+				Tripcode:    trip,
+			})
+		}
+		if err != nil {
 			sse := datastar.NewSSE(w, r)
-			slog.Error("Invalid password attempt", "username", user.Username)
-			sse.PatchElementTempl(Login("Username or password is incorrect."))
+			slog.Error("Error creating/fetching user by tripcode", "err", err)
+			sse.PatchElementTempl(Login("Something went wrong."))
 			return
 		}
 

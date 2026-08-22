@@ -113,12 +113,10 @@ func setupRoutes(db *sql.DB, bus *eventbus.Bus) chi.Router {
 	return r
 }
 
-// Tripcode derives a short stable identifier from a secret phrase: the same
-// secret always maps to the same identity, so a player reclaims their crab by
-// typing the same secret next visit — no password, no account recovery. An
-// empty secret yields a random identity that lives only as long as the
-// session cookie. Note: rotating COOKIE_STORE_SECRET_KEY changes every
-// tripcode.
+// Tripcode derives a short stable identifier from a secret phrase:
+// the same secret always maps to the same identity, so a player reclaims
+// their crab by typing the same secret next visit.
+// Note: rotating COOKIE_STORE_SECRET_KEY changes every tripcode.
 func Tripcode(secret string) string {
 	if strings.TrimSpace(secret) == "" {
 		b := make([]byte, 16)

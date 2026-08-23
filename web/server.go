@@ -6,7 +6,6 @@ import (
 	"crabspy/internal"
 	"crabspy/internal/eventbus"
 	"crabspy/sql/sqlcgen"
-	"crypto/hmac"
 	crand "crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -115,17 +114,16 @@ func setupRoutes(db *sql.DB, bus *eventbus.Bus) chi.Router {
 
 // Tripcode derives a short stable identifier from a secret phrase:
 // the same secret always maps to the same identity, so a player reclaims
-// their crab by typing the same secret next visit.
-// Note: rotating COOKIE_STORE_SECRET_KEY changes every tripcode.
+// their crab by typing the same secret next visit. The prefix
+// just domain-separates the hash; changing it would orphan every user.
 func Tripcode(secret string) string {
 	if strings.TrimSpace(secret) == "" {
 		b := make([]byte, 16)
 		crand.Read(b)
 		return base64.RawURLEncoding.EncodeToString(b)[:10]
 	}
-	mac := hmac.New(sha256.New, []byte(crabspy.Env.CookieStoreSecret))
-	mac.Write([]byte(secret))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))[:10]
+	sum := sha256.Sum256([]byte("crabspy-trip-v1:" + secret))
+	return base64.RawURLEncoding.EncodeToString(sum[:])[:10]
 }
 
 func loginPage() http.HandlerFunc {

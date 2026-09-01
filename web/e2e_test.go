@@ -163,17 +163,13 @@ func screenshot(t *testing.T, ctx context.Context, name string) {
 }
 
 // submitUntil re-runs the given fill/click actions until confirmSel becomes
-// visible. Datastar loads as an async ES module (from a CDN), so its data-bind /
-// data-on handlers are NOT attached the instant elements render — under load an
-// interaction can land before that and be silently dropped (filled form that
-// never submits, input whose signal never updates). There's no clean DOM
-// readiness flag to wait on, so we retry: once Datastar is wired, one more pass
-// of the actions takes effect and confirmSel appears. Re-running is safe because
-// setDatastarInput sets (not appends) values and re-clicks are idempotent.
+// visible. Datastar loads as an async ES module, so its data-bind /
+// data-on handlers are NOT attached the instant elements render — under testing an
+// interaction can land before that and be silently dropped.
 func submitUntil(t *testing.T, ctx context.Context, confirmSel string, actions ...chromedp.Action) {
 	t.Helper()
 	var lastErr error
-	for attempt := 0; attempt < 30; attempt++ {
+	for range 30 {
 		_ = chromedp.Run(ctx, actions...)
 		waitCtx, cancel := context.WithTimeout(ctx, time.Second)
 		lastErr = chromedp.Run(waitCtx, chromedp.WaitVisible(confirmSel))
@@ -187,11 +183,7 @@ func submitUntil(t *testing.T, ctx context.Context, confirmSel string, actions .
 }
 
 // setDatastarInput sets a Datastar data-bind input's value in one shot and
-// fires the events Datastar reacts to. Prefer this over chromedp.SendKeys for
-// inputs whose keydown handler triggers a debounced server re-render (e.g.
-// #room-name -> /validate/host): per-key typing can race that morph and drop
-// characters, especially under load. The single input event updates the bound
-// signal; the keydown event kicks the debounced validation.
+// fires the events Datastar reacts to.
 func setDatastarInput(sel, value string) chromedp.Action {
 	js := fmt.Sprintf(`(() => {
 		const el = document.querySelector(%q);
@@ -297,10 +289,7 @@ func TestHostRoom(t *testing.T) {
 // TestRoomFull fills a room to its 8-player max, then asserts a 9th player is
 // redirected to /full. (Player joining itself is covered by TestPlayThroughGame.)
 func TestRoomFull(t *testing.T) {
-	// Not t.Parallel: this test needs ~9 browsers at once. Running it alongside
-	// the other multi-browser test spawns enough Chrome instances to starve the
-	// CPU and blow the per-context timeouts. Non-parallel tests run isolated
-	// (before the parallel ones resume), so it gets the machine to itself.
+	// Not t.Parallel: this test needs ~9 browsers at once.
 	srv, db := newTestServer(t)
 
 	// Host creates the room (occupies slot 1).
@@ -315,9 +304,7 @@ func TestRoomFull(t *testing.T) {
 		i := i
 		username := fmt.Sprintf("player%d", i)
 		createUser(t, db, username, username)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			pCtx := newBrowserCtx(t, 20*time.Second)
 			loginAs(t, pCtx, srv, username, username)
 			if err := chromedp.Run(pCtx,
@@ -327,7 +314,7 @@ func TestRoomFull(t *testing.T) {
 				screenshot(t, pCtx, fmt.Sprintf("roomfull-join-%s", username))
 				t.Errorf("player %s failed to join: %v", username, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -351,11 +338,7 @@ func TestRoomFull(t *testing.T) {
 }
 
 // TestConcurrentJoinsRespectMaxPlayers fires many simultaneous join attempts at
-// one room and asserts the room never exceeds its max_players. This is the race
-// that happens when several people click a room link at the same instant; the
-// SSE join handler relies on JoinRoomIfNotFull being atomic (count check + insert
-// in a single statement) to enforce the cap. Driven at the query level so it's
-// deterministic rather than a flaky fan-out of browsers.
+// one room and asserts the room never exceeds its max_players.
 func TestConcurrentJoinsRespectMaxPlayers(t *testing.T) {
 	t.Parallel()
 	const maxPlayers = 8
@@ -393,10 +376,7 @@ func TestConcurrentJoinsRespectMaxPlayers(t *testing.T) {
 	var succeeded atomic.Int64
 	start := make(chan struct{})
 	for _, uid := range userIDs {
-		uid := uid
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			n, err := q.JoinRoomIfNotFull(ctx, sqlcgen.JoinRoomIfNotFullParams{
 				RoomID: room.ID,
@@ -409,7 +389,7 @@ func TestConcurrentJoinsRespectMaxPlayers(t *testing.T) {
 			if n == 1 {
 				succeeded.Add(1)
 			}
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()
@@ -442,9 +422,7 @@ func clickButtonByText(label string) string {
 // to a finish. It doesn't matter who the spy actually is — a unanimous spy vote
 // always ends the game.
 func TestPlayThroughGame(t *testing.T) {
-	// Not t.Parallel: spawns 8 browsers. See the note on TestRoomFull — running
-	// the two multi-browser tests concurrently starves Chrome and causes
-	// "context deadline exceeded" login timeouts.
+	// Not t.Parallel: spawns 8 browsers.
 	const totalPlayers = 8 // host + 7 joiners == room MaxPlayers default
 
 	srv, db := newTestServer(t)
@@ -466,9 +444,7 @@ func TestPlayThroughGame(t *testing.T) {
 		username := fmt.Sprintf("player%d", i)
 		createUser(t, db, username, username)
 		ctxs[i] = newBrowserCtx(t, 20*time.Second)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			loginAs(t, ctxs[i], srv, username, username)
 			if err := chromedp.Run(ctxs[i],
 				chromedp.Navigate(roomURL),
@@ -477,7 +453,7 @@ func TestPlayThroughGame(t *testing.T) {
 				screenshot(t, ctxs[i], fmt.Sprintf("playthrough-join-%s", username))
 				t.Errorf("player %s join: %v", username, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -491,11 +467,15 @@ func TestPlayThroughGame(t *testing.T) {
 		t.Fatalf("start game: %v", err)
 	}
 
-	// player2 pauses the game, which makes them the accuser.
+	// player2 pauses the game, which makes them the accuser. The pause button
+	// is clicked via a real DOM .click() rather than chromedp.Click's
+	// coordinate-based dispatch: SSE morphs can shift the page between
+	// chromedp locating the element and the synthetic click landing, causing
+	// the click to silently miss.
 	var accused bool
 	if err := chromedp.Run(ctxs[2],
 		chromedp.WaitVisible(`.border-2.rounded-2.cursor-pointer`), // pause button
-		chromedp.Click(`.border-2.rounded-2.cursor-pointer`),
+		chromedp.Evaluate(`document.querySelector('.border-2.rounded-2.cursor-pointer').click()`, nil),
 		chromedp.WaitVisible(`button.btn-small`), // "Accuse" buttons appear
 		// Accuse the host (its card carries the .is-host class), so we know
 		// exactly who is on trial and can skip that browser when voting.
